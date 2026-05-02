@@ -2,6 +2,13 @@
 
 This is a Rust embedded project scaffold. It contains a minimal `no_std` entry point and placeholder configuration files.
 
+Current behavior in `src/main.rs`:
+
+- No TCP socket command is used.
+- The firmware sends HTTP POST to `http://47.107.144.252:8100/mcu-report` every 30 seconds.
+- System status payload assembly is implemented in `src/system_status.rs`.
+- The payload currently includes the STM32 unique ID and raw placeholders for battery/signal/phone.
+
 - Build (ensure your cross-compilation toolchain is installed):
 
 ```
