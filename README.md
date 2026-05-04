@@ -1,21 +1,54 @@
-# stm32-4g-gps (Rust embedded scaffold)
+# stm32-4g-gps
 
-This is a Rust embedded project scaffold. It contains a minimal `no_std` entry point and placeholder configuration files.
+Rust `no_std` firmware for **STM32F103C8 (Blue Pill)** + 4G cellular modem with integrated GPS.  
+Framework: [Embassy](https://embassy.dev/) — async executor, blocking UART, embassy-time.
 
-Current behavior in `src/main.rs`:
+## Hardware
 
-- No TCP socket command is used.
-- The firmware sends HTTP POST to `http://47.107.144.252:8100/mcu-report` every 30 seconds.
-- System status payload assembly is implemented in `src/system_status.rs`.
-- The payload currently includes the STM32 unique ID and raw placeholders for battery/signal/phone.
+| Signal | Pin |
+|--------|-----|
+| USART1 TX → modem RX | PA9 |
+| USART1 RX ← modem TX | PA10 |
+| LED (active-low) | PC13 |
+| GPS power GPIO | PA12 (via AT+CGDRT/CGSETV) |
 
-- Build (ensure your cross-compilation toolchain is installed):
+## Firmware overview
 
+### Startup sequence
+1. Modem init: `AT` → `ATE0` → `CFUN=1` → `CGATT=1` → `QICSGP` → `NETOPEN`
+2. GPS one-time init (`src/gps.rs :: init`):
+   - Configure GPIO power pin
+   - Clear AGPS data (`AT+MGPSGET=ALL,0`)
+   - Power on GPS chip (`AT+MGPSC=1`), wait for `start up success.`
+   - Set GPS mode (`AT+GPSMODE=1`)
+   - Download & inject AGPS (`AT+AGNSSGET` / `AT+AGNSSSET`)
+   - Warm-up GPSST query, then power off
+
+### Main loop (every ~90 s)
+- Collect system info (ATI / CSQ / CCLK via `src/system_info.rs`)
+- **GPS power-save state machine**:
+  - Phase 1 — *Acquisition*: GPS stays on; poll `AT+GPSST` each cycle
+  - Phase 2 — *Stable* (3 consecutive fixes): enter duty-cycle mode
+  - Phase 3 — *Duty-cycle*: GPS off for 2 cycles, on for 1; revert to Phase 1 after 5 consecutive no-fix
+- GPSST result: raw `+GPSST: …` line forwarded as-is; off-cycle POSTs reuse the cached line with ` CACHED=1` appended
+- ICCID queried while GPS is off (avoids NMEA interleaving), cached between queries
+- HTTP POST: `AT$HTTPOPEN` → `AT$HTTPPARA` → `AT$HTTPRQH` → `AT$HTTPACTION` → `AT$HTTPDATA` → `AT$HTTPSEND` → `AT$HTTPCLOSE`
+
+### Payload fields (plain text, `\r\n` separated)
 ```
-cargo build --release
-cargo flash --release --chip STM32F103C8 --probe 0483:3748:
+ATI=...
+CSQ=...
+CCLK=...
++GPSST: <fix>,<lon>,<lat>,...   (or with CACHED=1 suffix)
+ICCID=...
+GPS_PS=0|1
 ```
 
-- Please tell me which STM32 MCU you are using (for example: `STM32F401RE`, `STM32F407VG`, `STM32G431`, etc.). Once you provide the MCU part, I will add device-specific PAC/register examples (for example: blinking the onboard LED, configuring the UART for a GPS module, etc.).
+## Build & flash
 
-Suggested next step: reply with your MCU part number and I will add low-level (PAC) examples, a tailored `memory.x`, `.cargo/config`/target settings, and flashing instructions.
+```sh
+cargo check --target thumbv7m-none-eabi
+cargo flash --release --chip STM32F103C8 --probe 0483:3748
+```
+
+Target: `thumbv7m-none-eabi` (Cortex-M3, no FPU).
