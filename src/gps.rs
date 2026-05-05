@@ -14,13 +14,23 @@ pub struct GpsRecord {
 
 // ── low-level helpers ─────────────────────────────────────────────────────────
 
+/// Clear ORE via ICR (on F0, ORE is NOT cleared by reading RDR — it stays
+/// set until ORECF is written, causing every subsequent byte to look like an
+/// ORE byte and be discarded).
+#[inline(always)]
+fn clear_ore() {
+    pac::USART1.icr().write(|w| w.set_ore(true));
+}
+
 fn drain_rx() {
     let deadline = Instant::now() + Duration::from_millis(200);
     while Instant::now() < deadline {
-        let sr = pac::USART1.sr().read();
-        // Read DR whenever RXNE or ORE is set; both bits require a DR read to clear.
-        if sr.rxne() || sr.ore() {
-            let _ = pac::USART1.dr().read().dr();
+        let sr = pac::USART1.isr().read();
+        if sr.ore() {
+            clear_ore();
+        }
+        if sr.rxne() {
+            let _ = pac::USART1.rdr().read().dr();
         }
     }
 }
@@ -30,10 +40,16 @@ fn read_until_marker(out: &mut [u8], marker: &[u8], timeout_ms: u64) -> usize {
     let mut n = 0usize;
     while n < out.len() {
         if Instant::now() >= deadline { break; }
-        let sr = pac::USART1.sr().read();
-        if sr.rxne() || sr.ore() {
-            let b = pac::USART1.dr().read().dr() as u8;
-            // Discard the byte when ORE was set — it may be corrupt.
+        let sr = pac::USART1.isr().read();
+        if sr.ore() {
+            // On F0, ORE must be explicitly cleared via ICR — reading RDR alone
+            // does NOT clear it.  Without this, every subsequent byte is seen as
+            // ORE and discarded forever.
+            clear_ore();
+        }
+        if sr.rxne() {
+            let b = pac::USART1.rdr().read().dr() as u8;
+            // If the snapshot had ORE set the byte may be the overwritten one; skip it.
             if sr.ore() { continue; }
             out[n] = b;
             n += 1;
@@ -53,10 +69,13 @@ fn read_gpsst_line(out: &mut [u8], timeout_ms: u64) -> usize {
     let mut line = [0u8; 192];
     let mut len = 0usize;
     while Instant::now() < deadline {
-        let sr = pac::USART1.sr().read();
-        if sr.rxne() || sr.ore() {
-            let b = pac::USART1.dr().read().dr() as u8;
-            // If ORE was set the byte may be the overwritten one; skip it.
+        let sr = pac::USART1.isr().read();
+        if sr.ore() {
+            clear_ore();
+        }
+        if sr.rxne() {
+            let b = pac::USART1.rdr().read().dr() as u8;
+            // If the snapshot had ORE set the byte may be the overwritten one; skip it.
             if sr.ore() { len = 0; continue; }
             if b == b'\r' || b == b'\n' {
                 if len > 0 {
@@ -75,6 +94,7 @@ fn read_gpsst_line(out: &mut [u8], timeout_ms: u64) -> usize {
     }
     0
 }
+
 
 /// Query AT+ICCID; return raw digit bytes.
 fn get_iccid(uart: &mut Uart<'static, Blocking>) -> ([u8; 24], usize) {

@@ -1,6 +1,6 @@
 # stm32-4g-gps
 
-Rust `no_std` firmware for **STM32F103C8 (Blue Pill)** + 4G cellular modem with integrated GPS.  
+Rust `no_std` firmware for **STM32F030C8** + 4G cellular modem with integrated GPS.  
 Framework: [Embassy](https://embassy.dev/) — async executor, blocking UART, embassy-time.
 
 ## Hardware
@@ -47,8 +47,8 @@ GPS_PS=0|1
 ## Build & flash
 
 ```sh
-cargo check --target thumbv7m-none-eabi
-cargo flash --release --chip STM32F103C8 --probe 0483:3748
+cargo check --target thumbv6m-none-eabi
+cargo flash --release --chip STM32F030C8 --probe 0483:3748
 ```
 
-Target: `thumbv7m-none-eabi` (Cortex-M3, no FPU).
+Target: `thumbv6m-none-eabi` (Cortex-M0, no FPU).

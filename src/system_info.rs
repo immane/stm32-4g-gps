@@ -1,15 +1,25 @@
+use defmt;
 use embassy_stm32::mode::Blocking;
 use embassy_stm32::pac;
 use embassy_stm32::usart::Uart;
 use embassy_time::{Duration, Instant};
+
+#[inline(always)]
+fn clear_ore() {
+    pac::USART1.icr().write(|w| w.set_ore(true));
+}
 
 /// Discard any bytes already sitting in the USART1 RX register.
 /// Runs for ~50 ms to flush any in-flight startup responses.
 fn drain_rx() {
     let deadline = Instant::now() + Duration::from_millis(50);
     while Instant::now() < deadline {
-        if pac::USART1.sr().read().rxne() {
-            let _ = pac::USART1.dr().read().dr();
+        let sr = pac::USART1.isr().read();
+        if sr.ore() {
+            clear_ore();
+        }
+        if sr.rxne() {
+            let _ = pac::USART1.rdr().read().dr();
         }
     }
 }
@@ -23,8 +33,12 @@ fn read_until_ok(out: &mut [u8], timeout_ms: u64) -> usize {
         if Instant::now() >= deadline {
             break;
         }
-        if pac::USART1.sr().read().rxne() {
-            let byte = pac::USART1.dr().read().dr() as u8;
+        let sr = pac::USART1.isr().read();
+        if sr.ore() {
+            clear_ore();
+        }
+        if sr.rxne() {
+            let byte = pac::USART1.rdr().read().dr() as u8;
             out[n] = byte;
             n += 1;
             if n >= 4 && &out[n - 4..n] == b"OK\r\n" {
@@ -55,6 +69,7 @@ pub fn collect(uart: &mut Uart<'static, Blocking>, out: &mut [u8]) -> usize {
         let _ = uart.blocking_write(cmd);
         // 1500 ms per command — enough time for slow modem responses.
         let n = read_until_ok(&mut tmp, 1500);
+        defmt::info!("sysinfo cmd recv {} bytes: {:?}", n, &tmp[..n.min(32)]);
         let copy = n.min(out.len().saturating_sub(idx));
         out[idx..idx + copy].copy_from_slice(&tmp[..copy]);
         idx += copy;

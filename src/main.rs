@@ -46,7 +46,7 @@ async fn main(spawner: Spawner) {
     let config = Config::default();
     let p = embassy_stm32::init(config);
 
-    // LED blink on PC13 (active low on Blue Pill)
+    // LED blink on PC13 (active low)
     let led = Output::new(p.PC13, Level::High, Speed::Low);
     spawner.spawn(blink_task(led)).unwrap();
 

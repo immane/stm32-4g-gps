@@ -28,7 +28,7 @@ embassy-sync = { version = "0.7" }
 embassy-time = { version = "0.5" }
 
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
-embassy-stm32 = { version = "0.4", features = ["stm32f103c8", "unstable-pac", "memory-x", "time-driver-any" ]  }
+embassy-stm32 = { version = "0.4", features = ["stm32f030c8", "unstable-pac", "memory-x", "time-driver-any" ]  }
 [profile.release]
 debug = 2
 lto = true
